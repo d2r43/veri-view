@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Veri-View Analysis</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="popup.css">
+</head>
+
+<body>
+
+    <!-- HEADER -->
+    <div id="header" class="header">
+        <h2 id="verdict-title">Veri-View Analysis</h2>
+    </div>
+
+    <!-- LOADING STATE (Skeleton) -->
+    <div id="loading-state" class="content" style="display: none;">
+        <div class="card">
+            <div class="skeleton-box" style="width: 100%; height: 180px;"></div>
+            <div style="display: flex; justify-content: space-between; margin-top: 15px;">
+                <div class="skeleton-box" style="width: 120px; height: 20px;"></div>
+                <div class="skeleton-box" style="width: 80px; height: 20px; border-radius: 12px;"></div>
+            </div>
+        </div>
+        <div class="card">
+            <div class="skeleton-box" style="width: 80px; height: 15px; margin-bottom: 10px;"></div>
+            <div class="skeleton-box" style="width: 100%; height: 12px; margin-bottom: 8px;"></div>
+            <div class="skeleton-box" style="width: 100%; height: 12px; margin-bottom: 8px;"></div>
+            <div class="skeleton-box" style="width: 60%; height: 12px;"></div>
+        </div>
+    </div>
+
+    <!-- MAIN DASHBOARD -->
+    <div id="dashboard" class="content" style="display: none;">
+
+        <!-- 1. ALERT BANNER -->
+        <div id="verdict-banner" class="alert-banner">
+            <span id="verdict-icon">⚠️</span>
+            <span id="verdict-main">Manipulated Image Detected</span>
+        </div>
+
+        <!-- 2. MAIN CARD -->
+        <div class="report-card">
+
+            <!-- Context Info -->
+            <div class="url-text" id="url-text">https://example.com/image...</div>
+
+            <div id="score-container" class="score-box">
+                <span id="score-label">Fake Confidence:</span>
+                <span id="score-value">98.5%</span>
+            </div>
+
+            <!-- Image Preview -->
+            <div class="img-frame">
+                <img id="preview" class="img-preview" src="">
+                <div id="analysis-overlay" class="overlay-badge">Analysis Complete</div>
+            </div>
+
+            <!-- 3. LEGAL ASSISTANT -->
+            <div id="legal-section" class="legal-block">
+                <div class="legal-header">Legal Action Assistant</div>
+                <div class="legal-desc">
+                    This image may violate <b>Section 66D</b> of the IT Act (Cheating by personation).
+                    <br>Hash: <span id="hash-short" style="font-family:monospace;">...</span>
+                </div>
+
+                <div class="action-grid">
+                    <button id="btn-report" class="btn btn-report">
+                        <span>📄</span> Generate PDF Report
+                    </button>
+                    <button id="btn-gov" class="btn btn-gov">
+                        <span>🏛️</span> CyberCrime.gov.in
+                    </button>
+                </div>
+            </div>
+
+            <!-- Safe Section -->
+            <div id="safe-section" style="display:none; text-align:center; padding: 20px;">
+                <button class="btn btn-safe" style="margin-bottom: 10px;">✅ Content Verified Authentic</button>
+                <button id="btn-report-safe" class="btn"
+                    style="width:100%; border:1px solid #e5e7eb; background:white; color:#374151;">
+                    📄 Download Authenticity Report
+                </button>
+            </div>
+
+            <!-- 4. TOGGLE DETAILS -->
+            <details class="tech-details">
+                <summary>View Technical Forensic Data</summary>
+                <div class="tech-content">
+                    <b>SHA-256:</b> <span id="hash-val" class="mono">--</span><br>
+                    <b>Metadata:</b> <span id="meta-val">--</span><br>
+                    <b>Latency:</b> <span id="latency-val">--</span><br>
+                    <b>Trust Score:</b> <span id="domain-trust">--</span>
+                </div>
+            </details>
+
+        </div>
+    </div>
+
+    <!-- PREMIUM EMPTY STATE -->
+    <div id="empty-state" class="empty-container" style="display: none;">
+        <!-- (Keep existing Empty State) -->
+        <div class="pulse-ring"><span style="font-size: 24px;">🛡️</span></div>
+        <h3 class="empty-title">Deepfake Scanner Active</h3>
+        <p class="empty-sub">Veri-View is monitoring web content.</p>
+        <div class="step-list">
+            <div class="step-item">
+                <div class="step-num">1</div><span>Hover an image</span>
+            </div>
+            <div class="step-item">
+                <div class="step-num">2</div><span>Wait for badge</span>
+            </div>
+            <div class="step-item">
+                <div class="step-num">3</div><span>Click for Report</span>
+            </div>
+        </div>
+    </div>
+
+    <script src="popup.js"></script>
+</body>
+
+</html>
