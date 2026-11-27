@@ -49,21 +49,23 @@
             <div class="url-text" id="url-text">https://example.com/image...</div>
 
             <div id="score-container" class="score-box">
-                <span id="score-label">Fake Confidence:</span>
+                <span id="score-label">AI-generated likelihood (model score):</span>
                 <span id="score-value">98.5%</span>
+                <span class="score-note">Screening signal only; not a calibrated probability or proof.</span>
             </div>
 
             <!-- Image Preview -->
             <div class="img-frame">
                 <img id="preview" class="img-preview" src="">
+                <video id="video-preview" class="img-preview" controls style="display:none;"></video>
                 <div id="analysis-overlay" class="overlay-badge">Analysis Complete</div>
             </div>
 
             <!-- 3. LEGAL ASSISTANT -->
             <div id="legal-section" class="legal-block">
-                <div class="legal-header">Legal Action Assistant</div>
+                <div class="legal-header">Screening Result</div>
                 <div class="legal-desc">
-                    This image may violate <b>Section 66D</b> of the IT Act (Cheating by personation).
+                    Automated screening is only a signal; verify the source and evidence independently.
                     <br>Hash: <span id="hash-short" style="font-family:monospace;">...</span>
                 </div>
 
@@ -79,10 +81,10 @@
 
             <!-- Safe Section -->
             <div id="safe-section" style="display:none; text-align:center; padding: 20px;">
-                <button class="btn btn-safe" style="margin-bottom: 10px;">✅ Content Verified Authentic</button>
+                <button class="btn btn-safe" style="margin-bottom: 10px;">No AI-generation signal detected</button>
                 <button id="btn-report-safe" class="btn"
                     style="width:100%; border:1px solid #e5e7eb; background:white; color:#374151;">
-                    📄 Download Authenticity Report
+                    📄 Download Screening Report
                 </button>
             </div>
 
@@ -93,6 +95,8 @@
                     <b>SHA-256:</b> <span id="hash-val" class="mono">--</span><br>
                     <b>Metadata:</b> <span id="meta-val">--</span><br>
                     <b>Latency:</b> <span id="latency-val">--</span><br>
+                    <b>Model:</b> <span id="model-val">--</span><br>
+                    <b>Frames sampled:</b> <span id="frames-val">--</span><br>
                     <b>Trust Score:</b> <span id="domain-trust">--</span>
                 </div>
             </details>
@@ -104,8 +108,8 @@
     <div id="empty-state" class="empty-container" style="display: none;">
         <!-- (Keep existing Empty State) -->
         <div class="pulse-ring"><span style="font-size: 24px;">🛡️</span></div>
-        <h3 class="empty-title">Deepfake Scanner Active</h3>
-        <p class="empty-sub">Veri-View is monitoring web content.</p>
+        <h3 class="empty-title">AI Media Screening Active</h3>
+        <p class="empty-sub">Veri-View checks large images automatically. Hover over a direct MP4 or WebM video, then click the Veri-View widget to sample frames for deepfake signals.</p>
         <div class="step-list">
             <div class="step-item">
                 <div class="step-num">1</div><span>Hover an image</span>

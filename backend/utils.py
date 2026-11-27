@@ -29,7 +29,7 @@ def download_image_to_memory(url):
 
 def generate_pdf_report(data):
     """
-    Generates a basic PDF report for legal usage.
+    Generates a basic media screening report.
     """
     timestamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
     filename = f"report_{timestamp}.pdf"
@@ -44,22 +44,33 @@ def generate_pdf_report(data):
     
     # Title
     c.setFont("Helvetica-Bold", 18)
-    c.drawString(50, 800, "Veri-View Forensic Analysis Report")
+    c.drawString(50, 800, "Veri-View Media Screening Report")
     
     c.setFont("Helvetica", 10)
     c.drawString(50, y_position, f"Generated On: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     y_position -= 20
-    c.drawString(50, y_position, f"Target URL: {data.get('url')[:60]}...") # Truncate URL if long
+    target_url = data.get('url') or "Not available"
+    c.drawString(50, y_position, f"Target URL: {target_url[:60]}...") # Truncate URL if long
     y_position -= 40
     
     # Verdict Section
     c.setFont("Helvetica-Bold", 14)
-    verdict = data.get('score', 0)
-    verdict_text = "AUTHENTIC MEDIA" if verdict < 30 else "MANIPULATION DETECTED"
+    verdict = data.get('score')
+    media_type = data.get('media_type', 'image')
+    if verdict is None:
+        verdict_text = "ANALYSIS UNAVAILABLE"
+    elif media_type == 'video':
+        verdict_text = "DEEPFAKE FRAME SIGNAL NOT DETECTED" if verdict <= 30 else (
+            "DEEPFAKE FRAME SIGNAL DETECTED" if verdict > 60 else "INCONCLUSIVE / REVIEW"
+        )
+    else:
+        verdict_text = "AI-GENERATION SIGNAL NOT DETECTED" if verdict <= 30 else (
+            "AI-GENERATION SIGNAL DETECTED" if verdict > 60 else "INCONCLUSIVE / REVIEW"
+        )
     
-    if verdict > 60:
+    if verdict is not None and verdict > 60:
         c.setFillColorRGB(0.8, 0, 0) # Red
-    elif verdict > 30:
+    elif verdict is not None and verdict > 30:
         c.setFillColorRGB(1, 0.6, 0) # Orange
         verdict_text = "INCONCLUSIVE / SUSPICIOUS"
     else:
@@ -69,7 +80,9 @@ def generate_pdf_report(data):
     c.setFillColorRGB(0, 0, 0) # Reset
     y_position -= 20
     c.setFont("Helvetica", 12)
-    c.drawString(50, y_position, f"Deepfake Probability Score: {verdict}%")
+    score_text = "Unavailable" if verdict is None else f"{verdict}%"
+    score_label = "Mean Deepfake Frame Score" if media_type == 'video' else "AI-Generated Image Score"
+    c.drawString(50, y_position, f"{score_label} (Model Score): {score_text}")
     y_position -= 40
     
     # Forensic Evidence Table
@@ -85,6 +98,15 @@ def generate_pdf_report(data):
     c.drawString(50, y_position, f"{data.get('hash', 'N/A')}")
     c.setFont("Helvetica", 10)
     y_position -= 25
+
+    c.drawString(50, y_position, f"Media type: {data.get('media_type', 'image')}")
+    y_position -= 15
+    if data.get('model'):
+        c.drawString(50, y_position, f"Model: {data['model']}")
+        y_position -= 15
+    if data.get('frame_count'):
+        c.drawString(50, y_position, f"Frames analyzed: {data['frame_count']}")
+        y_position -= 15
     
     # Metadata
     c.drawString(50, y_position, f"Exif Metadata:")
@@ -101,17 +123,16 @@ def generate_pdf_report(data):
 
     y_position -= 20
     
-    # Legal Context
+    # Screening limitations
     c.setFont("Helvetica-Bold", 12)
-    c.drawString(50, y_position, "Legal Context (India):")
+    c.drawString(50, y_position, "Screening limitations:")
     y_position -= 20
     c.setFont("Helvetica", 10)
     
     legal_text = [
-        "This report indicates potential violation of Section 66D of the Information Technology Act, 2000.",
-        "(Punishment for cheating by personation by using computer resource).",
-        "If this image is used to defame or impersonate, it may be admissible as digital evidence",
-        "under Section 65B of the Indian Evidence Act."
+        "This automated model score is a screening signal, not proof of authenticity or manipulation.",
+        "Model performance can vary by source, compression, generator, and media type.",
+        "Preserve original media and seek qualified review before relying on this result.",
     ]
     
     for line in legal_text:

@@ -1,33 +1,35 @@
-# Veri-View: AI-Powered Deepfake Detector 🛡️
+# Veri-View: AI Media Screening 🛡️
 
 ![Veri-View Banner](https://img.shields.io/badge/Status-Production_Ready-success)
 ![Python](https://img.shields.io/badge/Backend-Flask_%2B_Transformers-blue)
-![AI Model](https://img.shields.io/badge/Model-ViT_Deepfake_vs_Real-yellow)
+![AI Model](https://img.shields.io/badge/Model-Imager_1_Pro-yellow)
 
-**Veri-View** is a privacy-first Chrome Extension that passively scans web images to detect AI-generated content (Deepfakes) in real-time. It leverages a local Python backend running a **Vision Transformer (ViT)** model to analyze forensic artifacts and provides instant visual feedback.
+**Veri-View** is a privacy-first Chrome Extension that scans web images and user-selected direct videos for AI-generated content. Media is analyzed by a local Python backend.
 
-> **Key Feature:** Generates legal-grade PDF reports containing hash signatures, metadata, and probability scores, designed to assist in reporting violations under **Section 66D of the IT Act (India)**.
+> **Reports:** Generates screening reports containing the media hash, model score, and available metadata. The report is not a legal finding or proof of authenticity.
 
 ## ✨ Key Features
 
-- **🧠 Real-Time AI Analysis**: Uses the `dima806/deepfake_vs_real_image_detection` model (Hugging Face) for robust classification.
+- **🧠 Real-Time AI Analysis**: Uses the local [`Imagers/imager-1-pro`](https://huggingface.co/Imagers/imager-1-pro) classifier for AI-generated image screening. Its model card reports results on its Defactify validation split; those author-reported metrics are not independent validation and do not guarantee accuracy on every website or generator. The first startup downloads roughly 350 MB of weights.
+- **🎞️ Video Screening**: Hover a direct MP4 or WebM video and click the Veri-View widget to sample up to eight frames with a separate deepfake frame classifier. This is frame-level screening, not temporal analysis, and cannot catch every manipulation. Video uploads are limited to 50 MB and analyzed by the local backend. Streaming players that expose only `blob:` or segmented URLs are not supported yet.
 - **⚡ Passive Scanning**: Automatically highlights images on webpages:
-  - 🟢 **Green Border**: Verified Authentic
-  - 🔴 **Red Border**: High Probability Deepfake
-  - 🟡 **Yellow Border**: Suspicious / Low Confidence
-- **📄 Forensic Reporting**: One-click generation of PDF reports with:
-  - SHA-256 Image Hash
-  - EXIF Metadata Extraction
-  - Timestamped Verdict
-  - Legal Context (IT Act 2000)
-- **🔒 Privacy First**: Images are processed logically in your local backend. No data is stored on external cloud servers.
+  - 🟢 **Green Border**: No AI-generation signal detected
+  - 🔴 **Red Border**: High AI-generation model score
+  - 🟡 **Yellow Border**: Inconclusive model score
+- **📄 Screening Reports**: One-click generation of PDF reports with:
+  - SHA-256 media hash
+  - Available image metadata or sampled video-frame count
+  - Model name, score, and screening result
+- **🔒 Privacy First**: Media bytes are sent from the browser to `localhost` for analysis. Video bytes are held in a temporary local file while frames are decoded, then the file is removed. No image or video is sent to a cloud inference API.
+
+Model scores are screening signals, not calibrated probabilities or proof of authenticity. An inconclusive score should be reviewed independently.
 
 ## 🛠️ Tech Stack
 
 - **Frontend**: Vanilla JavaScript (Manifest V3), HTML5, CSS3.
 - **Backend**: Python (Flask).
-- **AI Engine**: Hugging Face `transformers` (ViT), `torch`, `Pillow`.
-- **Forensics**: `hashlib` (Hashing), `reportlab` (PDF Generation).
+- **AI Engine**: Hugging Face `transformers` (ConvNeXt), `torch`, `Pillow`.
+- **Reports**: `hashlib` (Hashing), `reportlab` (PDF Generation).
 
 ## 🚀 Installation & Setup
 
@@ -47,7 +49,7 @@ cd veri-view/backend
 python -m venv venv
 
 # Activate (Windows)
-.\venv\Scripts\activate
+.\venv\Scripts\Activate.ps1
 
 # Install Dependencies (Important: includes torch & transformers)
 pip install -r requirements.txt
@@ -69,11 +71,12 @@ Load the frontend into your browser.
 ## 📖 Usage Guide
 
 1.  **Start the Backend**: Ensure `app.py` is running (or double-click `start_server.bat`).
-2.  **Browse**: Go to Google Images or a News site.
+2.  **Browse**: Open a page with images or direct MP4/WebM videos.
 3.  **Visual Indicators**:
-    - Hover over any image to see the **Veri-View Widget**.
-    - Check the colored border for immediate status.
-4.  **Get Details**: Click the Widget (or Extension Icon) to open the Forensic Dashboard.
+    - Images are screened automatically; hover an image to open the **Veri-View Widget**.
+    - Hover a direct MP4/WebM video, then click the widget to sample up to eight frames.
+    - Streaming players that expose only `blob:` or segmented URLs are not supported.
+4.  **Get Details**: Click the widget or extension icon to open the screening dashboard.
 5.  **Report**: Click **"Generate PDF Report"** to download the evidence file.
 
 ## ⚖️ Legal Disclaimer

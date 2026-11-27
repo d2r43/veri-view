@@ -1,24 +1,33 @@
 import hashlib
 import io
+import os
+import tempfile
 import cv2
 import numpy as np
-import base64
 from PIL import Image
 from PIL.ExifTags import TAGS
 from urllib.parse import urlparse
 from transformers import pipeline
+from scoring import aggregate_frame_scores, fake_probability, verdict_for_score
 # import mediapipe as mp (DISABLED due to DLL errors)
 
-# Initialize AI Pipeline (Real ViT Model)
-# Using a model fine-tuned for Deepfake Detection
-# Source: https://huggingface.co/dima806/deepfake_vs_real_image_detection
+# Image-level AI generation model. Override to test a different local model.
+MODEL_ID = os.environ.get("VERIVIEW_IMAGE_MODEL", "Imagers/imager-1-pro")
 try:
-    print("Loading AI Model (ViT)...")
-    pipe = pipeline("image-classification", model="dima806/deepfake_vs_real_image_detection")
+    print(f"Loading AI image model ({MODEL_ID})...")
+    pipe = pipeline("image-classification", model=MODEL_ID)
     print("Model Loaded Successfully.")
 except Exception as e:
     print(f"Model Load Failed: {e}")
     pipe = None
+
+# Keep the frame-level face-manipulation detector for video. It is loaded only
+# when a user asks to analyze a video, so image-only browsing does not load two models.
+VIDEO_MODEL_ID = os.environ.get(
+    "VERIVIEW_VIDEO_MODEL", "dima806/deepfake_vs_real_image_detection"
+)
+video_pipe = None
+video_model_load_attempted = False
 
 # Trust Score Helper
 TRUSTED_DOMAINS = {
@@ -64,7 +73,7 @@ def get_image_metadata(pil_image):
         return "Stripped / None Found"
     return meta_dict
 
-def analyze_image(image_bytes, url=""):
+def analyze_image(image_bytes, url="", classifier=pipe, model_id=MODEL_ID):
     """
     Enhanced Forensic Analysis with MediaPipe.
     Returns: Score, Verdict, Hash, Metadata, Domain Trust.
@@ -77,90 +86,94 @@ def analyze_image(image_bytes, url=""):
         img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
 
         if img is None:
-            return {"score": 0, "verdict": "ERROR", "details": "Image decode failed"}
-
-        # 2. Face Detection (SKIPPED to prevent crashes, using Whole-Image Analysis)
-        # MediaPipe was causing DLL load errors. 
-        # The new ViT model (dima806/deepfake_vs_real) works on the FULL image, 
-        # so specific face extraction is less critical.
-        
-        # We will assume "1 face" (or just content) exists to trigger the UI badge
-        face_count = 1 
-        face_img = img # Analyze the whole image
+            return {"score": None, "verdict": "ERROR", "error": "Image decode failed"}
 
         # Domain Trust
         trust_info = get_domain_trust(url)
+        img_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+        pil_image = Image.fromarray(img_rgb)
+        full_pil = Image.open(io.BytesIO(image_bytes))
+        metadata = get_image_metadata(full_pil)
 
-        # AI Analysis
-        fake_score = 0
-        verdict = "REAL"
-        
-        if img is not None:
-            
-            # Convert BGR (OpenCV) to RGB (PIL)
-            # Resize for speed/efficiency (optional, but good practice)
-            img_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
-            pil_image = Image.fromarray(img_rgb)
-            
-            # Extract Metadata from PIL
-            full_pil = Image.open(io.BytesIO(image_bytes))
-            metadata = get_image_metadata(full_pil)
-
-            # AI Inference
-            if pipe:
-                try:
-                    predictions = pipe(pil_image)
-                    # Predictions like [{'label': 'fake', 'score': 0.99}, {'label': 'real', 'score': 0.01}]
-                    
-                    fake_score = 0
-                    for pred in predictions:
-                        label = pred['label'].lower()
-                        if label == 'fake' or label == 'ai': 
-                            fake_score = pred['score'] * 100
-                            break
-                        elif label == 'real':
-                            # If we found real first, we need to check if fake is the other one
-                            pass
-                            
-                    # If 'fake' wasn't the top label, derive from real
-                    if fake_score == 0:
-                         for pred in predictions:
-                            if pred['label'].lower() == 'real':
-                                fake_score = (1 - pred['score']) * 100
-                                break
-
-                except Exception as e:
-                    print(f"Inference Error: {e}")
-                    fake_score = 45.0 # Fallback
-            else:
-                 fake_score = 45.0 # Fallback if pipe fails
-            
-            # Logic: 
-            # Fake > 60 => RED (FAKE)
-            # 30 < Fake <= 60 => YELLOW (UNCERTAIN)
-            # Fake <= 30 => GREEN (REAL)
-            
-            if fake_score > 60:
-                verdict = "FAKE"
-            elif fake_score > 30:
-                verdict = "WARNING"
-            else:
-                verdict = "REAL"
-            
-        else:
-            # No face found
-            verdict = "SKIPPED"
-            metadata = "N/A"
+        if classifier is None:
+            return {"score": None, "verdict": "ERROR", "error": "AI model is unavailable"}
+        predictions = classifier(pil_image)
+        fake_score = fake_probability(predictions)
+        if fake_score is None:
+            return {"score": None, "verdict": "ERROR", "error": "Model labels were not recognized"}
+        verdict = verdict_for_score(fake_score)
 
         return {
             "score": round(fake_score, 2),
             "verdict": verdict,
-            "face_count": face_count,
             "hash": img_hash,
             "metadata": metadata,
-            "trust_idx": trust_info
+            "trust_idx": trust_info,
+            "model": model_id,
         }
 
     except Exception as e:
         print(f"Analysis Error: {e}")
-        return {"score": 0, "verdict": "ERROR", "details": str(e)}
+        return {"score": None, "verdict": "ERROR", "error": "Image analysis failed"}
+
+
+def analyze_video(video_bytes, url="", max_frames=8):
+    """Sample up to eight frames from a local temporary copy and score each."""
+    global video_pipe, video_model_load_attempted
+    suffix = ".webm" if "webm" in url.lower() else ".mp4"
+    temp_path = None
+    capture = None
+    try:
+        with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as temp_file:
+            temp_file.write(video_bytes)
+            temp_path = temp_file.name
+
+        capture = cv2.VideoCapture(temp_path)
+        frame_total = int(capture.get(cv2.CAP_PROP_FRAME_COUNT))
+        if not capture.isOpened() or frame_total < 1:
+            return {"score": None, "verdict": "ERROR", "error": "Video could not be decoded"}
+
+        if not video_model_load_attempted:
+            video_model_load_attempted = True
+            try:
+                print(f"Loading video frame model ({VIDEO_MODEL_ID})...")
+                video_pipe = pipeline("image-classification", model=VIDEO_MODEL_ID)
+            except Exception as e:
+                print(f"Video frame model load failed: {e}")
+                video_pipe = None
+        if video_pipe is None:
+            return {"score": None, "verdict": "ERROR", "error": "Video analysis model is unavailable"}
+
+        frame_indexes = np.linspace(0, frame_total - 1, num=min(max_frames, frame_total), dtype=int)
+        results = []
+        for frame_index in frame_indexes:
+            capture.set(cv2.CAP_PROP_POS_FRAMES, int(frame_index))
+            ok, frame = capture.read()
+            if not ok:
+                continue
+            encoded, buffer = cv2.imencode(".jpg", frame)
+            if encoded:
+                results.append(analyze_image(
+                    buffer.tobytes(), url=url, classifier=video_pipe, model_id=VIDEO_MODEL_ID
+                ))
+
+        aggregation = aggregate_frame_scores([item.get("score") for item in results])
+        if aggregation is None:
+            return {"score": None, "verdict": "ERROR", "error": "No video frames could be analyzed"}
+
+        return {
+            **aggregation,
+            "hash": hashlib.sha256(video_bytes).hexdigest(),
+            "metadata": {"sampled_frames": aggregation["frame_count"]},
+            "trust_idx": get_domain_trust(url),
+            "model": VIDEO_MODEL_ID,
+            "media_type": "video",
+        }
+    except Exception as e:
+        print(f"Video analysis error: {e}")
+        return {"score": None, "verdict": "ERROR", "error": "Video analysis failed"}
+    finally:
+        if capture is not None:
+            capture.release()
+        if temp_path and os.path.exists(temp_path):
+            os.unlink(temp_path)

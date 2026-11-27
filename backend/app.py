@@ -1,13 +1,14 @@
 import os
 from flask import Flask, request, jsonify, send_from_directory
 from flask_cors import CORS
-from analysis_engine import analyze_image
+from analysis_engine import analyze_image, analyze_video
 from utils import download_image_to_memory, generate_pdf_report
 import traceback
 import time
 
 app = Flask(__name__)
 CORS(app)  # Enable CORS for Extension
+app.config["MAX_CONTENT_LENGTH"] = 51 * 1024 * 1024
 
 @app.route('/health', methods=['GET'])
 def health():
@@ -42,7 +43,7 @@ def check_image():
         start_time = time.time()
         result = analyze_image(image_bytes, url=image_url)
         latency = round(time.time() - start_time, 2)
-        
+        result.setdefault('media_type', 'image')
         result['latency'] = latency
         
         # Step 3: Return Result
@@ -53,6 +54,31 @@ def check_image():
         traceback.print_exc()
         return jsonify({"error": "Internal Server Error"}), 500
 
+
+@app.route('/check-video', methods=['POST'])
+def check_video():
+    """Analyze a directly addressable video by sampling up to eight frames."""
+    try:
+        video_file = request.files.get('video')
+        if not video_file:
+            return jsonify({"error": "No video provided"}), 400
+
+        video_bytes = video_file.read(50 * 1024 * 1024 + 1)
+        if len(video_bytes) > 50 * 1024 * 1024:
+            return jsonify({"error": "Video exceeds the 50 MB analysis limit"}), 413
+        if not video_bytes:
+            return jsonify({"error": "Video is empty"}), 400
+
+        source_url = request.form.get('source_url', '')
+        start_time = time.time()
+        result = analyze_video(video_bytes, url=source_url)
+        result['latency'] = round(time.time() - start_time, 2)
+        return jsonify(result)
+    except Exception as e:
+        print(f"Error processing video: {e}")
+        traceback.print_exc()
+        return jsonify({"error": "Video analysis failed"}), 500
+
 @app.route('/reports/<path:filename>')
 def serve_report(filename):
     return send_from_directory('reports', filename)
@@ -60,7 +86,7 @@ def serve_report(filename):
 @app.route('/report', methods=['POST'])
 def create_report():
     """
-    Generates a legal PDF report.
+    Generates a media screening PDF report.
     Payload: { "url": "...", "metadata": {...}, "evidence": {...} }
     """
     try:

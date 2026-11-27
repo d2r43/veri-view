@@ -42,12 +42,69 @@ function scanImages() {
     });
 }
 
+function scanVideos() {
+    document.querySelectorAll('video').forEach(video => {
+        if (video.dataset.veriViewVideoBound === "true" || video.dataset.veriViewVideoBound === "waiting") return;
+        if ((video.clientWidth || video.videoWidth) < 100 || (video.clientHeight || video.videoHeight) < 100) {
+            if (!video.videoWidth || !video.videoHeight) {
+                video.dataset.veriViewVideoBound = "waiting";
+                video.addEventListener('loadedmetadata', () => {
+                    delete video.dataset.veriViewVideoBound;
+                    scanVideos();
+                }, { once: true });
+            }
+            return;
+        }
+
+        video.dataset.veriViewVideoBound = "true";
+        video.addEventListener('mouseenter', () => {
+            if (!globalWidget) createGlobalWidget();
+            globalWidget.className = 'veri-view-widget expanded warning';
+            globalWidget.querySelector('#vv-title').innerText = 'Analyze this video';
+            globalWidget.querySelector('#vv-desc').innerText = 'Click here to sample frames';
+            globalWidget.onclick = () => analyzeVideo(video);
+        });
+    });
+}
+
+function analyzeVideo(video) {
+    if (video.dataset.veriViewVideoProcessed === "scanning") return;
+    const videoUrl = video.currentSrc || video.src;
+    if (!videoUrl) {
+        showVideoError("This player does not expose a direct video URL.");
+        return;
+    }
+
+    video.dataset.veriViewVideoProcessed = "scanning";
+    globalWidget.querySelector('#vv-title').innerText = 'Analyzing video…';
+    globalWidget.querySelector('#vv-desc').innerText = 'Sampling up to 8 frames locally';
+    chrome.runtime.sendMessage({ type: "CHECK_VIDEO", url: videoUrl }, (response) => {
+        if (response && response.success) {
+            video.dataset.veriViewVideoProcessed = "true";
+            const data = { ...response.data, url: videoUrl, media_type: "video" };
+            const type = data.verdict === "FAKE" ? "fake" : (data.verdict === "REAL" ? "safe" : "warning");
+            video.classList.add(`veri-view-${type}`);
+            updateWidget(data, type);
+        } else {
+            delete video.dataset.veriViewVideoProcessed;
+            showVideoError(response?.error || "Video analysis failed. Try again.");
+        }
+    });
+}
+
+function showVideoError(message) {
+    if (!globalWidget) createGlobalWidget();
+    globalWidget.className = 'veri-view-widget expanded warning';
+    globalWidget.querySelector('#vv-title').innerText = 'Video not analyzed';
+    globalWidget.querySelector('#vv-desc').innerText = message;
+}
+
 function applyVerdict(img, data) {
     // Validation: Check for backend errors or missing fields
     if (data.error || !data.verdict) {
         console.warn("Veri-View Analysis Issue:", data);
         data.verdict = "ERROR";
-        data.score = 0;
+        data.score = null;
     }
 
     let type = "safe";
@@ -77,13 +134,13 @@ function applyVerdict(img, data) {
     };
 
     // Calculate Display Confidence
-    let displayScore = Math.round(data.score);
-    if (data.verdict === "REAL") {
-        displayScore = 100 - displayScore;
-    }
+    const displayScore = data.score == null ? null : Math.round(data.score);
 
     // Add Visible Badge (Per-Image)
-    addBadge(img, `${data.verdict} ${displayScore}%`, type, () => {
+    const badgeText = displayScore == null
+        ? "ANALYSIS UNAVAILABLE"
+        : `${data.verdict === "WARNING" || data.verdict === "UNDECISIVE" ? "REVIEW" : data.verdict} · AI ${displayScore}%`;
+    addBadge(img, badgeText, type, () => {
         updateWidget(data, type);
     });
 }
@@ -155,14 +212,15 @@ function updateWidget(data, type) {
 
     // Content
     const icon = type === 'fake' ? '⚠️' : (type === 'safe' ? '✅' : '🛡️');
-    const title = type === 'fake' ? 'Deepfake Detected' : (type === 'safe' ? 'Verified Real' : 'Undecisive');
-    const score = Math.round(data.score);
-    let displayScore = score;
-    if (data.verdict === "REAL") displayScore = 100 - score;
+    const title = data.media_type === "video"
+        ? (type === 'fake' ? 'Deepfake signal likely' : (type === 'safe' ? 'Low deepfake signal' : 'Video analysis inconclusive'))
+        : (type === 'fake' ? 'High AI-generation score' : (type === 'safe' ? 'Low AI-generation score' : 'Image analysis inconclusive'));
+    const displayScore = data.score == null ? "Unavailable" : `${Math.round(data.score)}%`;
 
     globalWidget.querySelector('.veri-view-widget-icon').innerText = icon;
     globalWidget.querySelector('#vv-title').innerText = title;
-    globalWidget.querySelector('#vv-desc').innerText = `Confidence: ${displayScore}% (Click for Report)`;
+    const scoreLabel = data.media_type === "video" ? "Mean deepfake frame score" : "AI-generation model score";
+    globalWidget.querySelector('#vv-desc').innerText = `${scoreLabel}: ${displayScore} - Click for report`;
 
     // AUTO-UPDATE CONTEXT: Save this image as the "active" one for the popup
     // IMPORTANT: Pass ALL backend data (hash, metadata, latency, etc.)
@@ -173,7 +231,10 @@ function updateWidget(data, type) {
         hash: data.hash,
         metadata: data.metadata,
         latency: data.latency,
-        trust_idx: data.trust_idx
+        trust_idx: data.trust_idx,
+        media_type: data.media_type || "image",
+        model: data.model,
+        frame_count: data.frame_count
     };
 
     chrome.runtime.sendMessage({
@@ -230,9 +291,11 @@ function addBadge(img, text, type, onClickHandler) {
 
 // Initial Scan
 scanImages();
+scanVideos();
 
 // Observe for new images
 const observer = new MutationObserver((mutations) => {
     scanImages();
+    scanVideos();
 });
 observer.observe(document.documentElement, { childList: true, subtree: true });

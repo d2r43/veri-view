@@ -1,12 +1,19 @@
 // Veri-View Background Script
 
 const API_URL = "http://localhost:5000/check";
+const VIDEO_API_URL = "http://localhost:5000/check-video";
 const MAX_IMAGE_BYTES = 10 * 1024 * 1024;
+const MAX_VIDEO_BYTES = 50 * 1024 * 1024;
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     if (message.type === "CHECK_IMAGE") {
         handleCheckImage(message.url, sendResponse);
         return true; // Keep channel open for async response
+    }
+
+    if (message.type === "CHECK_VIDEO") {
+        handleCheckVideo(message.url, sendResponse);
+        return true;
     }
 
     if (message.type === "OPEN_REPORT") {
@@ -84,6 +91,60 @@ async function handleCheckImage(url, sendResponse) {
         sendResponse({ success: true, data: data });
     } catch (error) {
         console.error("API Error:", error);
+        sendResponse({ success: false, error: error.message });
+    }
+}
+
+async function handleCheckVideo(url, sendResponse) {
+    try {
+        const parsedUrl = new URL(url);
+        if (!['http:', 'https:'].includes(parsedUrl.protocol)) {
+            throw new Error("This player uses a streaming URL that cannot be fetched directly. Try a direct MP4 or WebM video.");
+        }
+
+        const videoResponse = await fetch(url);
+        if (!videoResponse.ok) {
+            throw new Error(`Video request failed (${videoResponse.status})`);
+        }
+        if (!videoResponse.body) throw new Error("Video response had no readable body");
+
+        const declaredSize = Number(videoResponse.headers.get("Content-Length"));
+        if (declaredSize > MAX_VIDEO_BYTES) {
+            throw new Error("Video exceeds the 50 MB analysis limit");
+        }
+
+        const reader = videoResponse.body.getReader();
+        const chunks = [];
+        let videoSize = 0;
+        while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            videoSize += value.byteLength;
+            if (videoSize > MAX_VIDEO_BYTES) {
+                await reader.cancel();
+                throw new Error("Video exceeds the 50 MB analysis limit");
+            }
+            chunks.push(value);
+        }
+
+        const videoBlob = new Blob(chunks, {
+            type: videoResponse.headers.get("Content-Type") || "video/mp4"
+        });
+        if (!videoBlob.type.startsWith("video/") && videoBlob.type !== "application/octet-stream") {
+            throw new Error("The selected resource is not a video");
+        }
+
+        const formData = new FormData();
+        const extension = videoBlob.type.includes("webm") ? "webm" : "mp4";
+        formData.append("video", videoBlob, `video.${extension}`);
+        formData.append("source_url", url);
+        const response = await fetch(VIDEO_API_URL, { method: "POST", body: formData });
+        if (!response.ok) throw new Error(`Video analysis request failed (${response.status})`);
+        const data = await response.json();
+        if (data.error) throw new Error(data.error);
+        sendResponse({ success: true, data: data });
+    } catch (error) {
+        console.error("Video analysis error:", error);
         sendResponse({ success: false, error: error.message });
     }
 }

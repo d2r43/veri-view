@@ -49,8 +49,7 @@ function renderDashboard(data) {
     document.getElementById('dashboard').style.display = 'block';
 
     const verdict = data.verdict || "UNKNOWN";
-    let score = Math.round(data.score || 0);
-    if (verdict === "REAL") score = 100 - score;
+    const score = data.score == null ? null : Math.round(data.score);
 
     // 1. BANNER & COLOR LOGIC
     const banner = document.getElementById('verdict-banner');
@@ -64,27 +63,41 @@ function renderDashboard(data) {
     // Set Colors & Text
     if (verdict === "FAKE") {
         banner.classList.add('fake');
-        mainText.innerText = "Manipulated Image Detected";
+        mainText.innerText = data.media_type === "video" ? "Deepfake Signal Likely" : "AI-Generated Image Likely";
         scoreVal.style.color = '#ce2e2e';
     }
-    else if (verdict === "WARNING" || verdict === "UNDECISIVE") {
+    else if (verdict !== "REAL") {
         banner.classList.add('warning');
-        mainText.innerText = verdict === "WARNING" ? "Suspicious Activity" : "Analysis Inconclusive";
+        mainText.innerText = verdict === "ERROR" ? "Analysis Unavailable" : "Analysis Inconclusive";
         scoreVal.style.color = '#f59e0b';
     }
     else {
         banner.classList.add('safe');
-        mainText.innerText = "Verified Authentic";
+        mainText.innerText = data.media_type === "video" ? "Deepfake Signal Not Detected" : "AI Generation Not Detected";
         scoreVal.style.color = '#10b981';
     }
 
     // 2. DATA BINDING
     document.getElementById('url-text').innerText = data.url;
-    document.getElementById('score-value').innerText = `${score}%`;
-    document.getElementById('preview').src = data.url;
+    document.getElementById('score-value').innerText = score == null ? "Unavailable" : `${score}%`;
+    document.getElementById('score-label').innerText = data.media_type === "video"
+        ? "Mean deepfake frame score (model score):"
+        : "AI-generated image likelihood (model score):";
+    const imagePreview = document.getElementById('preview');
+    const videoPreview = document.getElementById('video-preview');
+    if (data.media_type === "video") {
+        imagePreview.style.display = 'none';
+        videoPreview.style.display = 'block';
+        videoPreview.src = data.url;
+    } else {
+        videoPreview.style.display = 'none';
+        videoPreview.removeAttribute('src');
+        imagePreview.style.display = 'block';
+        imagePreview.src = data.url;
+    }
 
     // 3. LEGAL SECTION TOGGLE
-    if (verdict === "FAKE" || verdict === "WARNING" || verdict === "UNDECISIVE") {
+    if (verdict === "FAKE" || verdict === "WARNING" || verdict === "UNDECISIVE" || verdict === "ERROR") {
         document.getElementById('legal-section').style.display = 'block';
         document.getElementById('safe-section').style.display = 'none';
     } else {
@@ -109,6 +122,8 @@ function renderDashboard(data) {
     }
 
     document.getElementById('latency-val').innerText = data.latency + "s";
+    document.getElementById('model-val').innerText = data.model || "Not reported";
+    document.getElementById('frames-val').innerText = data.frame_count || "N/A";
 
     if (data.trust_idx) {
         document.getElementById('domain-trust').innerText = `${data.trust_idx.domain} (${data.trust_idx.trust})`;
@@ -147,7 +162,10 @@ async function generateReport(data) {
                 score: data.score,
                 timestamp: new Date().toISOString(),
                 hash: data.hash,
-                metadata: data.metadata
+                metadata: data.metadata,
+                media_type: data.media_type,
+                model: data.model,
+                frame_count: data.frame_count
             })
         });
 
