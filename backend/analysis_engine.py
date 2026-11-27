@@ -4,18 +4,64 @@ import os
 import tempfile
 import cv2
 import numpy as np
+import torch
 from PIL import Image
 from PIL.ExifTags import TAGS
 from urllib.parse import urlparse
+from huggingface_hub import hf_hub_download
+from safetensors.torch import load_file
+from torchvision import models, transforms
 from transformers import pipeline
 from scoring import aggregate_frame_scores, fake_probability, verdict_for_score
+from model_config import image_pipeline_options
 # import mediapipe as mp (DISABLED due to DLL errors)
 
 # Image-level AI generation model. Override to test a different local model.
-MODEL_ID = os.environ.get("VERIVIEW_IMAGE_MODEL", "Imagers/imager-1-pro")
+IMAGE_PIPELINE_OPTIONS = image_pipeline_options()
+MODEL_ID = IMAGE_PIPELINE_OPTIONS["repo_id"]
+
+
+def load_image_classifier():
+    """Load the publisher's torchvision checkpoint without executing Hub code."""
+    checkpoint_path = hf_hub_download(
+        repo_id=IMAGE_PIPELINE_OPTIONS["repo_id"],
+        filename=IMAGE_PIPELINE_OPTIONS["filename"],
+        revision=IMAGE_PIPELINE_OPTIONS["revision"],
+    )
+    model = models.convnext_base(weights=None)
+    model.classifier[2] = torch.nn.Linear(model.classifier[2].in_features, 2)
+    model.load_state_dict(load_file(checkpoint_path, device="cpu"), strict=True)
+    model.eval()
+    return model
+
+
+class LocalImageClassifier:
+    """Adapt local ConvNeXt logits to the pipeline-style output used below."""
+    def __init__(self, model):
+        self.model = model
+        self.transform = transforms.Compose([
+            transforms.Resize(256),
+            transforms.CenterCrop(224),
+            transforms.ToTensor(),
+            transforms.Normalize(
+                mean=[0.485, 0.456, 0.406],
+                std=[0.229, 0.224, 0.225],
+            ),
+        ])
+
+    def __call__(self, image):
+        tensor = self.transform(image.convert("RGB")).unsqueeze(0)
+        with torch.inference_mode():
+            probabilities = torch.softmax(self.model(tensor)[0], dim=0)
+        return [
+            {"label": "real", "score": float(probabilities[0])},
+            {"label": "ai-generated", "score": float(probabilities[1])},
+        ]
+
+
 try:
-    print(f"Loading AI image model ({MODEL_ID})...")
-    pipe = pipeline("image-classification", model=MODEL_ID)
+    print(f"Loading AI image model ({MODEL_ID}@{IMAGE_PIPELINE_OPTIONS['revision']})...")
+    pipe = LocalImageClassifier(load_image_classifier())
     print("Model Loaded Successfully.")
 except Exception as e:
     print(f"Model Load Failed: {e}")
