@@ -155,4 +155,3 @@ Image uploads are limited to 10 MB. Direct video uploads are limited to 50 MB. S
 - Public model weights are downloaded from Hugging Face and cached locally.
 - When screening a web page, the extension passes the source URL to the local backend as context; it does not ask the backend to fetch arbitrary URLs.
 
-
