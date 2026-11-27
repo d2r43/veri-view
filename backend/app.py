@@ -20,15 +20,23 @@ def check_image():
     Payload: { "url": "http://..." }
     """
     try:
-        data = request.json
-        image_url = data.get('url')
-        if not image_url:
-            return jsonify({"error": "No URL provided"}), 400
-
-        # Step 1: Download Image (RAM)
-        image_bytes = download_image_to_memory(image_url)
+        # New extension clients upload the image already loaded by the browser.
+        # Keep accepting URL JSON for older clients, but prefer local bytes so
+        # remote hosts do not need to permit server-side downloads.
+        image_file = request.files.get('image')
+        if image_file:
+            image_bytes = image_file.read(10 * 1024 * 1024 + 1)
+            image_url = request.form.get('source_url', '')
+            if len(image_bytes) > 10 * 1024 * 1024:
+                return jsonify({"error": "Image exceeds the 10 MB analysis limit"}), 413
+        else:
+            data = request.get_json(silent=True) or {}
+            image_url = data.get('url')
+            if not image_url:
+                return jsonify({"error": "No image provided"}), 400
+            image_bytes = download_image_to_memory(image_url)
         if not image_bytes:
-            return jsonify({"error": "Failed to download image"}), 400
+            return jsonify({"error": "Failed to read image"}), 400
 
         # Step 2: Analyze (with Latency)
         start_time = time.time()

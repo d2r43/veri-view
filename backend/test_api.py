@@ -1,53 +1,62 @@
-import requests
-import time
+"""Offline API tests. No model download or external image host is required."""
+import importlib
+import io
 import sys
+import types
+import unittest
+from unittest.mock import patch
 
-BASE_URL = "http://localhost:5000"
 
-def test_health():
-    try:
-        r = requests.get(f"{BASE_URL}/health")
-        if r.status_code == 200:
-            print("✅ Health Check Passed")
-            return True
-        else:
-            print(f"❌ Health Check Failed: {r.status_code}")
-            return False
-    except Exception as e:
-        print(f"❌ Health Check Error: {e}")
-        return False
+# app.py imports a module that downloads the model during import. Substitute
+# its boundaries so these route tests remain fast and network-free.
+analysis_engine_stub = types.ModuleType("analysis_engine")
+analysis_engine_stub.analyze_image = lambda image_bytes, url="": {}
+utils_stub = types.ModuleType("utils")
+utils_stub.download_image_to_memory = lambda url: None
+utils_stub.generate_pdf_report = lambda data: "reports/test.pdf"
+sys.modules["analysis_engine"] = analysis_engine_stub
+sys.modules["utils"] = utils_stub
+sys.path.insert(0, ".")
+app_module = importlib.import_module("app")
 
-def test_check_image():
-    # URL of a random image (e.g., from Wikipedia or placeholder)
-    # Using a reliable public image
-    url = "https://upload.wikimedia.org/wikipedia/commons/8/85/Elon_Musk_Royal_Society_%28crop1%29.jpg" 
-    payload = {"url": url}
-    
-    try:
-        r = requests.post(f"{BASE_URL}/check", json=payload)
-        if r.status_code == 200:
-            data = r.json()
-            print(f"✅ Analysis Passed: {data}")
-            return True
-        else:
-            print(f"❌ Analysis Failed: {r.text}")
-            return False
-    except Exception as e:
-        print(f"❌ Analysis Error: {e}")
-        return False
+
+class CheckImageRouteTests(unittest.TestCase):
+    def setUp(self):
+        self.client = app_module.app.test_client()
+
+    def test_uploaded_image_is_analyzed_without_remote_download(self):
+        with patch.object(app_module, "analyze_image", return_value={"verdict": "REAL"}) as analyze:
+            response = self.client.post(
+                "/check",
+                data={
+                    "image": (io.BytesIO(bytes([1, 2, 3, 4])), "photo.jpg", "image/jpeg"),
+                    "source_url": "https://images.example/photo.jpg",
+                },
+                content_type="multipart/form-data",
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.get_json()["verdict"], "REAL")
+        self.assertEqual(analyze.call_args.args[0], bytes([1, 2, 3, 4]))
+        self.assertEqual(analyze.call_args.kwargs["url"], "https://images.example/photo.jpg")
+
+    def test_missing_image_is_rejected(self):
+        response = self.client.post("/check", json={})
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.get_json()["error"], "No image provided")
+
+    def test_oversized_upload_is_rejected_before_analysis(self):
+        image_data = bytes(10 * 1024 * 1024 + 1)
+        with patch.object(app_module, "analyze_image") as analyze:
+            response = self.client.post(
+                "/check",
+                data={"image": (io.BytesIO(image_data), "large.jpg", "image/jpeg")},
+                content_type="multipart/form-data",
+            )
+
+        self.assertEqual(response.status_code, 413)
+        analyze.assert_not_called()
+
 
 if __name__ == "__main__":
-    print("Waiting for server to start...")
-    retries = 10
-    while retries > 0:
-        if test_health():
-            break
-        time.sleep(2)
-        retries -= 1
-        
-    if retries == 0:
-        print("Server failed to start.")
-        sys.exit(1)
-        
-    print("Running Tests...")
-    test_check_image()
+    unittest.main()

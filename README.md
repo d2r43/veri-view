@@ -40,8 +40,8 @@ The backend handles the heavy AI lifting.
 
 ```bash
 # Clone the repository
-git clone https://github.com/aryancodesit/Veri-View.git
-cd Veri-View/backend
+git clone https://github.com/d2r43/veri-view.git
+cd veri-view/backend
 
 # Create Virtual Environment
 python -m venv venv

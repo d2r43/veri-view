@@ -9,12 +9,13 @@ function scanImages() {
 
     const images = document.querySelectorAll('img');
     images.forEach(img => {
-        if (img.dataset.veriViewProcessed) return;
+        if (img.dataset.veriViewProcessed === "true" || img.dataset.veriViewProcessed === "scanning") return;
+        if (Number(img.dataset.veriViewRetryAfter || 0) > Date.now()) return;
 
         // Filter small images (icons, etc)
         if (img.width < 100 || img.height < 100) return;
 
-        img.dataset.veriViewProcessed = "true";
+        img.dataset.veriViewProcessed = "scanning";
 
         // Mark as scanning
         img.classList.add('veri-view-scanning');
@@ -22,14 +23,20 @@ function scanImages() {
         // Send to Background
         chrome.runtime.sendMessage({
             type: "CHECK_IMAGE",
-            url: img.src
+            url: img.currentSrc || img.src
         }, (response) => {
             img.classList.remove('veri-view-scanning');
 
             if (response && response.success) {
-                applyVerdict(img, response.data);
+                img.dataset.veriViewProcessed = "true";
+                applyVerdict(img, { ...response.data, url: img.currentSrc || img.src });
             } else {
+                delete img.dataset.veriViewProcessed;
+                img.dataset.veriViewRetryAfter = String(Date.now() + 15000);
                 console.error("Analysis failed for", img.src, response);
+                // Backend startup and transient image-host errors should not
+                // permanently exclude an image from analysis.
+                setTimeout(scanImages, 15000);
             }
         });
     });
@@ -228,4 +235,4 @@ scanImages();
 const observer = new MutationObserver((mutations) => {
     scanImages();
 });
-observer.observe(document.body, { childList: true, subtree: true });
+observer.observe(document.documentElement, { childList: true, subtree: true });
