@@ -1,32 +1,38 @@
 # Veri-View
 
-Veri-View is a privacy-first browser extension for checking images and videos for signs of AI generation or manipulation. It sends media from the browser to a backend running on your own computer, where the model analyzes it.
+Veri-View is a browser extension for screening images and videos for signs of AI generation or manipulation. The extension sends media to a Python backend running on your computer, where the models analyze it locally.
 
-> **Note:** Detection results are estimates, not proof. Treat the score as a signal for further review.
+**Detection results are estimates, not proof.** Use Veri-View as a screening aid, not as the sole basis for important decisions.
+
+## Models
+
+- **Images:** [`Imagers/imager-1-pro`](https://huggingface.co/Imagers/imager-1-pro), using a ConvNeXt-Base architecture.
+- **Video frames:** [`dima806/deepfake_vs_real_image_detection`](https://huggingface.co/dima806/deepfake_vs_real_image_detection). The backend samples frames from a video and analyzes them individually.
+
+The image model is a ConvNeXt model, not a Vision Transformer (ViT). Model files are downloaded from Hugging Face when needed and cached on your computer.
 
 ## How it works
 
-1. The extension finds or receives an image or video in your browser.
-2. It sends the media to the Veri-View backend on your computer.
-3. The backend analyzes the media and returns a result to the extension.
+1. The browser extension sends the selected media to the Veri-View backend on your computer.
+2. The backend analyzes the image or sampled video frames.
+3. The extension displays the screening result. You can also generate a PDF report.
 
-The backend runs at `http://127.0.0.1:5000`. The model is downloaded from Hugging Face when needed, so an internet connection is required for the initial download. Media analysis is performed by the local backend.
+The backend uses `http://127.0.0.1:5000`. Media analysis runs locally; media is not sent to a hosted inference service.
 
 ## Requirements
 
 - Python 3.13
 - Git
-- An internet connection for installing dependencies and downloading the model the first time
+- An internet connection to install dependencies and download the models the first time
+- Enough disk space for the Python packages and model files
 
-The first model download can take a while and requires several hundred megabytes of disk space.
+The first model download may take several minutes. Later runs use the local cache.
 
 ## Backend setup
 
-Run these commands from the repository’s `backend` directory.
+Open a terminal at the repository root, then follow the instructions for your operating system.
 
-### Windows PowerShell
-
-From the repository root:
+### Windows — PowerShell
 
 ```powershell
 cd backend
@@ -37,19 +43,17 @@ pip install -r requirements.txt
 python app.py
 ```
 
-If PowerShell blocks virtual-environment activation, allow it for the current terminal only, then activate again:
+If PowerShell blocks activation, allow scripts for this terminal session and activate again:
 
 ```powershell
 Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
 .\.venv\Scripts\Activate.ps1
 ```
 
-If the Python launcher cannot find Python 3.13, install Python 3.13 and reopen PowerShell.
+If `py -3.13` is not recognized, install Python 3.13 and reopen PowerShell.
 
 ### macOS
 
-From the repository root:
-
 ```bash
 cd backend
 python3.13 -m venv .venv
@@ -59,12 +63,10 @@ pip install -r requirements.txt
 python app.py
 ```
 
-If `python3.13` is not available, install Python 3.13 and reopen Terminal.
+If `python3.13` is not found, install Python 3.13 and reopen Terminal.
 
 ### Linux
 
-From the repository root:
-
 ```bash
 cd backend
 python3.13 -m venv .venv
@@ -74,20 +76,18 @@ pip install -r requirements.txt
 python app.py
 ```
 
-On Debian or Ubuntu, if creating the virtual environment fails, install the venv package for your Python version, then repeat the setup:
+On Debian or Ubuntu, if creating the virtual environment fails, install the venv package for Python 3.13, then retry:
 
 ```bash
 sudo apt update
 sudo apt install python3.13-venv
 ```
 
-Keep the terminal running while you use the extension. The backend is ready when its startup output says the model loaded and Flask is running at `http://127.0.0.1:5000`.
+Keep the terminal open while using the extension. The backend is ready when it reports that the model loaded and Flask is running at `http://127.0.0.1:5000`. Stop it with **Ctrl+C**.
 
-To stop the backend, press **Ctrl+C** in that terminal.
+### Start the backend again later
 
-### Starting it again later
-
-Open a terminal in the repository’s `backend` directory, activate the virtual environment, and start the app:
+From the `backend` directory, activate the environment and start the app:
 
 **Windows PowerShell**
 
@@ -103,64 +103,42 @@ source .venv/bin/activate
 python app.py
 ```
 
-## Load the extension
+## Load the browser extension
 
-1. Start the backend using the instructions above.
-2. Open your browser’s extensions page:
+1. Start the backend.
+2. Open the extensions page:
    - Chrome: `chrome://extensions`
    - Brave: `brave://extensions`
 3. Turn on **Developer mode**.
 4. Select **Load unpacked**.
 5. Choose the repository’s `extension` folder.
-6. Open an image or video in the browser and use the Veri-View extension.
+6. Open an image or video and use the Veri-View extension.
 
-The extension needs to be loaded separately in each browser where you want to use it. If you change extension files, reload Veri-View on the extensions page.
+Load the extension separately in each browser where you want to use it. If you edit extension files, reload Veri-View from the browser’s extensions page.
 
 ## Run the tests
 
-With the backend virtual environment activated, run from the `backend` directory:
+With the backend environment activated, run:
 
 ```bash
 python -m unittest discover -v
 ```
 
-If you prefer to run the API, model configuration, and scoring tests directly:
-
-```bash
-python -m unittest test_model_config test_scoring test_api
-```
-
-## Troubleshooting
-
-### The extension cannot connect
-
-- Confirm the backend terminal is still running.
-- Check that the backend reports `http://127.0.0.1:5000`.
-- Reload the extension from the browser’s extensions page.
-- Keep the backend address at `127.0.0.1`; the extension expects the local service.
-
-### The model fails to load
-
-- Confirm Python dependencies installed successfully in the active virtual environment.
-- Check that you have an internet connection for the initial model download.
-- Run `python app.py` again and read the first error message printed in the terminal.
-- On Windows, a Hugging Face symlink warning is generally non-fatal; the cache can still work, though it may use more disk space.
-
-### Activation fails
-
-Make sure the terminal is in the `backend` directory and that `.venv` exists. If it does not, create it with the command for your operating system above.
-
-### Video checks fail
-
-Keep the backend running while checking the video. Video analysis can take longer than image analysis. If it fails, try a shorter supported video and check the backend terminal for an error.
+Run the tests from the `backend` directory.
 
 ## Privacy
 
-- Media is sent from the browser extension to the backend running on your own computer.
-- The backend uses the locally running model to analyze media.
-- The model files are downloaded from Hugging Face when needed; this requires an internet connection.
-- Do not expose the backend port to the public internet.
+- Media is sent from the extension to the backend on your own computer.
+- Model inference runs locally; media is not sent to a hosted inference service.
+- The model files are downloaded from Hugging Face when needed. This requires an internet connection for the initial download.
+- The backend is intended for local use. Do not expose its port to the public internet.
 
 ## Limitations
 
-AI detection is imperfect. Resizing, compression, editing, new generation methods, and unfamiliar content can affect results. A high score does not prove that media is fake, and a low score does not prove that it is authentic. Use Veri-View as an aid to review, not as the sole basis for important decisions.
+AI detection is imperfect. Compression, resizing, editing, unfamiliar content, and newer generation methods can affect results. A high score does not prove media is fake, and a low score does not prove it is authentic. Video results are based on sampled frames and may miss details between them.
+
+Do not treat Veri-View results or generated reports as legal findings or definitive proof.
+
+## License
+
+This project is licensed under the MIT License. See [`LICENSE`](LICENSE).
