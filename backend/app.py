@@ -1,7 +1,7 @@
 import os
 from flask import Flask, request, jsonify, send_from_directory
 from flask_cors import CORS
-from analysis_engine import analyze_image, analyze_video
+from analysis_engine import analyze_image, analyze_video, analyze_video_frames
 from utils import download_image_to_memory, generate_pdf_report
 import traceback
 import time
@@ -78,6 +78,39 @@ def check_video():
         print(f"Error processing video: {e}")
         traceback.print_exc()
         return jsonify({"error": "Video analysis failed"}), 500
+
+
+@app.route('/check-video-frames', methods=['POST'])
+def check_video_frames():
+    """Analyze cropped frames captured locally from a rendered video player."""
+    try:
+        frame_files = request.files.getlist('frames')
+        if not frame_files or len(frame_files) > 8:
+            return jsonify({"error": "Provide between 1 and 8 video frames"}), 400
+
+        frame_bytes = []
+        total_bytes = 0
+        for frame_file in frame_files:
+            if not frame_file.mimetype.startswith('image/'):
+                return jsonify({"error": "Video frame uploads must be images"}), 400
+            frame = frame_file.read(2 * 1024 * 1024 + 1)
+            total_bytes += len(frame)
+            if len(frame) > 2 * 1024 * 1024 or total_bytes > 10 * 1024 * 1024:
+                return jsonify({"error": "Video frames exceed the 10 MB analysis limit"}), 413
+            if not frame:
+                return jsonify({"error": "A video frame is empty"}), 400
+            frame_bytes.append(frame)
+
+        source_url = request.form.get('source_url', '')
+        start_time = time.time()
+        result = analyze_video_frames(frame_bytes, url=source_url)
+        result['latency'] = round(time.time() - start_time, 2)
+        result['capture_method'] = 'browser'
+        return jsonify(result)
+    except Exception as e:
+        print(f"Error processing captured video frames: {e}")
+        traceback.print_exc()
+        return jsonify({"error": "Video frame analysis failed"}), 500
 
 @app.route('/reports/<path:filename>')
 def serve_report(filename):

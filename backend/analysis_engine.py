@@ -29,6 +29,20 @@ VIDEO_MODEL_ID = os.environ.get(
 video_pipe = None
 video_model_load_attempted = False
 
+
+def get_video_pipeline():
+    """Load the video frame model on the first video request only."""
+    global video_pipe, video_model_load_attempted
+    if not video_model_load_attempted:
+        video_model_load_attempted = True
+        try:
+            print(f"Loading video frame model ({VIDEO_MODEL_ID})...")
+            video_pipe = pipeline("image-classification", model=VIDEO_MODEL_ID)
+        except Exception as e:
+            print(f"Video frame model load failed: {e}")
+            video_pipe = None
+    return video_pipe
+
 # Trust Score Helper
 TRUSTED_DOMAINS = {
     'wikipedia.org': 'High',
@@ -119,7 +133,6 @@ def analyze_image(image_bytes, url="", classifier=pipe, model_id=MODEL_ID):
 
 def analyze_video(video_bytes, url="", max_frames=8):
     """Sample up to eight frames from a local temporary copy and score each."""
-    global video_pipe, video_model_load_attempted
     suffix = ".webm" if "webm" in url.lower() else ".mp4"
     temp_path = None
     capture = None
@@ -133,15 +146,8 @@ def analyze_video(video_bytes, url="", max_frames=8):
         if not capture.isOpened() or frame_total < 1:
             return {"score": None, "verdict": "ERROR", "error": "Video could not be decoded"}
 
-        if not video_model_load_attempted:
-            video_model_load_attempted = True
-            try:
-                print(f"Loading video frame model ({VIDEO_MODEL_ID})...")
-                video_pipe = pipeline("image-classification", model=VIDEO_MODEL_ID)
-            except Exception as e:
-                print(f"Video frame model load failed: {e}")
-                video_pipe = None
-        if video_pipe is None:
+        classifier = get_video_pipeline()
+        if classifier is None:
             return {"score": None, "verdict": "ERROR", "error": "Video analysis model is unavailable"}
 
         frame_indexes = np.linspace(0, frame_total - 1, num=min(max_frames, frame_total), dtype=int)
@@ -154,7 +160,7 @@ def analyze_video(video_bytes, url="", max_frames=8):
             encoded, buffer = cv2.imencode(".jpg", frame)
             if encoded:
                 results.append(analyze_image(
-                    buffer.tobytes(), url=url, classifier=video_pipe, model_id=VIDEO_MODEL_ID
+                    buffer.tobytes(), url=url, classifier=classifier, model_id=VIDEO_MODEL_ID
                 ))
 
         aggregation = aggregate_frame_scores([item.get("score") for item in results])
@@ -177,3 +183,29 @@ def analyze_video(video_bytes, url="", max_frames=8):
             capture.release()
         if temp_path and os.path.exists(temp_path):
             os.unlink(temp_path)
+
+
+def analyze_video_frames(frame_bytes, url=""):
+    """Analyze already-cropped browser frames without storing the full video."""
+    if not frame_bytes or len(frame_bytes) > 8:
+        return {"score": None, "verdict": "ERROR", "error": "Provide between 1 and 8 video frames"}
+    classifier = get_video_pipeline()
+    if classifier is None:
+        return {"score": None, "verdict": "ERROR", "error": "Video analysis model is unavailable"}
+
+    results = [
+        analyze_image(frame, url=url, classifier=classifier, model_id=VIDEO_MODEL_ID)
+        for frame in frame_bytes
+    ]
+    aggregation = aggregate_frame_scores([item.get("score") for item in results])
+    if aggregation is None:
+        return {"score": None, "verdict": "ERROR", "error": "No video frames could be analyzed"}
+
+    return {
+        **aggregation,
+        "hash": hashlib.sha256(b"".join(frame_bytes)).hexdigest(),
+        "metadata": {"sampled_frames": aggregation["frame_count"], "capture_method": "local browser frame capture"},
+        "trust_idx": get_domain_trust(url),
+        "model": VIDEO_MODEL_ID,
+        "media_type": "video",
+    }

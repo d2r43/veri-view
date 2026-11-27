@@ -12,6 +12,7 @@ from unittest.mock import patch
 analysis_engine_stub = types.ModuleType("analysis_engine")
 analysis_engine_stub.analyze_image = lambda image_bytes, url="": {}
 analysis_engine_stub.analyze_video = lambda video_bytes, url="": {}
+analysis_engine_stub.analyze_video_frames = lambda frame_bytes, url="": {}
 utils_stub = types.ModuleType("utils")
 utils_stub.download_image_to_memory = lambda url: None
 utils_stub.generate_pdf_report = lambda data: "reports/test.pdf"
@@ -97,6 +98,43 @@ class CheckVideoRouteTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 413)
         analyze.assert_not_called()
+
+
+class CheckVideoFramesRouteTests(unittest.TestCase):
+    def setUp(self):
+        self.client = app_module.app.test_client()
+
+    def test_captured_frames_are_analyzed_by_local_backend(self):
+        frames = [b"jpeg-frame-one", b"jpeg-frame-two"]
+        with patch.object(app_module, "analyze_video_frames", return_value={
+            "verdict": "WARNING", "score": 48.0, "frame_count": 2, "media_type": "video"
+        }) as analyze:
+            response = self.client.post(
+                "/check-video-frames",
+                data={
+                    "frames": [
+                        (io.BytesIO(frames[0]), "frame-1.jpg", "image/jpeg"),
+                        (io.BytesIO(frames[1]), "frame-2.jpg", "image/jpeg"),
+                    ],
+                    "source_url": "https://www.youtube.com/watch?v=example",
+                },
+                content_type="multipart/form-data",
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.get_json()["capture_method"], "browser")
+        self.assertEqual(analyze.call_args.args[0], frames)
+        self.assertEqual(analyze.call_args.kwargs["url"], "https://www.youtube.com/watch?v=example")
+
+    def test_too_many_captured_frames_are_rejected(self):
+        data = {
+            "frames": [
+                (io.BytesIO(b"frame"), f"frame-{index}.jpg", "image/jpeg")
+                for index in range(9)
+            ]
+        }
+        response = self.client.post("/check-video-frames", data=data, content_type="multipart/form-data")
+        self.assertEqual(response.status_code, 400)
 
 
 if __name__ == "__main__":

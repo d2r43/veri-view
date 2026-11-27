@@ -58,6 +58,7 @@
             <div class="img-frame">
                 <img id="preview" class="img-preview" src="">
                 <video id="video-preview" class="img-preview" controls style="display:none;"></video>
+                <div id="video-preview-note" style="display:none; padding:24px; text-align:center; color:#6b7280;">Sampled video frames were analyzed locally. The original streaming player cannot be previewed in this report.</div>
                 <div id="analysis-overlay" class="overlay-badge">Analysis Complete</div>
             </div>
 
@@ -109,7 +110,7 @@
         <!-- (Keep existing Empty State) -->
         <div class="pulse-ring"><span style="font-size: 24px;">🛡️</span></div>
         <h3 class="empty-title">AI Media Screening Active</h3>
-        <p class="empty-sub">Veri-View checks large images automatically. Hover over a direct MP4 or WebM video, then click the Veri-View widget to sample frames for deepfake signals.</p>
+        <p class="empty-sub">Veri-View checks large images automatically. Open a seekable video's watch page, hover the player, then click the Veri-View widget to sample frames locally.</p>
         <div class="step-list">
             <div class="step-item">
                 <div class="step-num">1</div><span>Hover an image</span>

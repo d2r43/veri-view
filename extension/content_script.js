@@ -45,6 +45,8 @@ function scanImages() {
 function scanVideos() {
     document.querySelectorAll('video').forEach(video => {
         if (video.dataset.veriViewVideoBound === "true" || video.dataset.veriViewVideoBound === "waiting") return;
+        const host = location.hostname.toLowerCase();
+        if ((host === "youtube.com" || host.endsWith(".youtube.com")) && location.pathname !== "/watch") return;
         if ((video.clientWidth || video.videoWidth) < 100 || (video.clientHeight || video.videoHeight) < 100) {
             if (!video.videoWidth || !video.videoHeight) {
                 video.dataset.veriViewVideoBound = "waiting";
@@ -61,34 +63,169 @@ function scanVideos() {
             if (!globalWidget) createGlobalWidget();
             globalWidget.className = 'veri-view-widget expanded warning';
             globalWidget.querySelector('#vv-title').innerText = 'Analyze this video';
-            globalWidget.querySelector('#vv-desc').innerText = 'Click here to sample frames';
+            globalWidget.querySelector('#vv-desc').innerText = 'Click to sample video frames locally';
             globalWidget.onclick = () => analyzeVideo(video);
         });
     });
 }
 
-function analyzeVideo(video) {
+async function analyzeVideo(video) {
     if (video.dataset.veriViewVideoProcessed === "scanning") return;
     const videoUrl = video.currentSrc || video.src;
-    if (!videoUrl) {
-        showVideoError("This player does not expose a direct video URL.");
-        return;
-    }
-
     video.dataset.veriViewVideoProcessed = "scanning";
     globalWidget.querySelector('#vv-title').innerText = 'Analyzing video…';
-    globalWidget.querySelector('#vv-desc').innerText = 'Sampling up to 8 frames locally';
-    chrome.runtime.sendMessage({ type: "CHECK_VIDEO", url: videoUrl }, (response) => {
+    const directVideo = isDirectVideoUrl(videoUrl);
+    globalWidget.querySelector('#vv-desc').innerText = directVideo
+        ? 'Sampling up to 8 frames locally'
+        : 'Capturing up to 8 visible frames locally';
+
+    try {
+        let response;
+        if (directVideo) {
+            response = await sendExtensionMessage({ type: "CHECK_VIDEO", url: videoUrl });
+        } else {
+            const frames = await captureRenderedVideoFrames(video);
+            response = await sendExtensionMessage({
+                type: "CHECK_VIDEO_FRAMES",
+                frames,
+                sourceUrl: location.href
+            });
+        }
+
         if (response && response.success) {
             video.dataset.veriViewVideoProcessed = "true";
-            const data = { ...response.data, url: videoUrl, media_type: "video" };
+            const data = {
+                ...response.data,
+                url: directVideo ? videoUrl : location.href,
+                preview_url: directVideo ? videoUrl : "",
+                media_type: "video"
+            };
             const type = data.verdict === "FAKE" ? "fake" : (data.verdict === "REAL" ? "safe" : "warning");
             video.classList.add(`veri-view-${type}`);
             updateWidget(data, type);
         } else {
-            delete video.dataset.veriViewVideoProcessed;
             showVideoError(response?.error || "Video analysis failed. Try again.");
         }
+    } catch (error) {
+        showVideoError(error.message || "Video analysis failed. Try again.");
+    } finally {
+        if (video.dataset.veriViewVideoProcessed === "scanning") delete video.dataset.veriViewVideoProcessed;
+    }
+}
+
+function isDirectVideoUrl(url) {
+    if (!url) return false;
+    try {
+        return /\.(mp4|webm)$/i.test(new URL(url, location.href).pathname);
+    } catch (_) {
+        return false;
+    }
+}
+
+function sendExtensionMessage(message) {
+    return new Promise((resolve, reject) => {
+        chrome.runtime.sendMessage(message, response => {
+            if (chrome.runtime.lastError) reject(new Error(chrome.runtime.lastError.message));
+            else resolve(response);
+        });
+    });
+}
+
+function wait(milliseconds) {
+    return new Promise(resolve => setTimeout(resolve, milliseconds));
+}
+
+function seekVideo(video, timeSeconds) {
+    return new Promise((resolve, reject) => {
+        if (Math.abs(video.currentTime - timeSeconds) < 0.15) {
+            resolve();
+            return;
+        }
+        const timeout = setTimeout(() => {
+            cleanup();
+            reject(new Error("The player could not seek to a sample frame"));
+        }, 10000);
+        const cleanup = () => {
+            clearTimeout(timeout);
+            video.removeEventListener("seeked", onSeeked);
+            video.removeEventListener("error", onError);
+        };
+        const onSeeked = () => { cleanup(); resolve(); };
+        const onError = () => { cleanup(); reject(new Error("The player could not decode a sample frame")); };
+        video.addEventListener("seeked", onSeeked, { once: true });
+        video.addEventListener("error", onError, { once: true });
+        try {
+            video.currentTime = timeSeconds;
+        } catch (_) {
+            cleanup();
+            reject(new Error("This video player does not support frame seeking"));
+        }
+    });
+}
+
+async function captureRenderedVideoFrames(video) {
+    if (!Number.isFinite(video.duration) || video.duration < 2 || video.seekable.length === 0) {
+        throw new Error("Open a seekable video page (not a live stream or thumbnail preview) and try again.");
+    }
+    const rect = video.getBoundingClientRect();
+    if (rect.width < 100 || rect.height < 100 || rect.bottom <= 0 || rect.right <= 0 || rect.top >= innerHeight || rect.left >= innerWidth) {
+        throw new Error("Keep the video player visible and at least 100 pixels wide and tall.");
+    }
+
+    const wasPaused = video.paused;
+    const originalTime = video.currentTime;
+    const originalVisibility = globalWidget?.style.visibility || "";
+    const frames = [];
+    video.pause();
+    try {
+        const sampleCount = 8;
+        for (let index = 0; index < sampleCount; index++) {
+            const target = video.duration * (index + 0.5) / sampleCount;
+            await seekVideo(video, target);
+            await wait(180);
+            if (globalWidget) globalWidget.style.visibility = "hidden";
+            await new Promise(requestAnimationFrame);
+            await new Promise(requestAnimationFrame);
+            const capture = await sendExtensionMessage({ type: "CAPTURE_VISIBLE_TAB" });
+            if (!capture?.success) throw new Error(capture?.error || "Could not capture the video player");
+            frames.push(await cropCapturedVideoFrame(capture.dataUrl, video.getBoundingClientRect()));
+            if (globalWidget) globalWidget.style.visibility = originalVisibility;
+            if (index < sampleCount - 1) await wait(550);
+        }
+    } finally {
+        if (globalWidget) globalWidget.style.visibility = originalVisibility;
+        try { await seekVideo(video, originalTime); } catch (_) { /* keep the playback error visible */ }
+        if (!wasPaused) video.play().catch(() => {});
+    }
+    return frames;
+}
+
+function cropCapturedVideoFrame(dataUrl, rect) {
+    return new Promise((resolve, reject) => {
+        const screenshot = new Image();
+        screenshot.onload = () => {
+            const scaleX = screenshot.naturalWidth / window.innerWidth;
+            const scaleY = screenshot.naturalHeight / window.innerHeight;
+            const left = Math.max(0, rect.left * scaleX);
+            const top = Math.max(0, rect.top * scaleY);
+            const right = Math.min(screenshot.naturalWidth, rect.right * scaleX);
+            const bottom = Math.min(screenshot.naturalHeight, rect.bottom * scaleY);
+            const cropWidth = right - left;
+            const cropHeight = bottom - top;
+            if (cropWidth < 100 || cropHeight < 100) {
+                reject(new Error("The video is not fully visible in the browser tab"));
+                return;
+            }
+            const resize = Math.min(1, 640 / cropWidth);
+            const canvas = document.createElement("canvas");
+            canvas.width = Math.round(cropWidth * resize);
+            canvas.height = Math.round(cropHeight * resize);
+            const context = canvas.getContext("2d");
+            context.drawImage(screenshot, left, top, cropWidth, cropHeight, 0, 0, canvas.width, canvas.height);
+            resolve(canvas.toDataURL("image/jpeg", 0.82));
+        };
+        screenshot.onerror = () => reject(new Error("Could not crop a captured video frame"));
+        screenshot.src = dataUrl;
     });
 }
 
@@ -234,7 +371,8 @@ function updateWidget(data, type) {
         trust_idx: data.trust_idx,
         media_type: data.media_type || "image",
         model: data.model,
-        frame_count: data.frame_count
+        frame_count: data.frame_count,
+        preview_url: data.preview_url || ""
     };
 
     chrome.runtime.sendMessage({

@@ -85,13 +85,22 @@ function renderDashboard(data) {
         : "AI-generated image likelihood (model score):";
     const imagePreview = document.getElementById('preview');
     const videoPreview = document.getElementById('video-preview');
+    const videoPreviewNote = document.getElementById('video-preview-note');
     if (data.media_type === "video") {
         imagePreview.style.display = 'none';
-        videoPreview.style.display = 'block';
-        videoPreview.src = data.url;
+        if (data.preview_url) {
+            videoPreview.style.display = 'block';
+            videoPreview.src = data.preview_url;
+            videoPreviewNote.style.display = 'none';
+        } else {
+            videoPreview.style.display = 'none';
+            videoPreview.removeAttribute('src');
+            videoPreviewNote.style.display = 'block';
+        }
     } else {
         videoPreview.style.display = 'none';
         videoPreview.removeAttribute('src');
+        videoPreviewNote.style.display = 'none';
         imagePreview.style.display = 'block';
         imagePreview.src = data.url;
     }

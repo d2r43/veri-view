@@ -2,8 +2,10 @@
 
 const API_URL = "http://localhost:5000/check";
 const VIDEO_API_URL = "http://localhost:5000/check-video";
+const VIDEO_FRAMES_API_URL = "http://localhost:5000/check-video-frames";
 const MAX_IMAGE_BYTES = 10 * 1024 * 1024;
 const MAX_VIDEO_BYTES = 50 * 1024 * 1024;
+const MAX_CAPTURED_FRAME_BYTES = 2 * 1024 * 1024;
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     if (message.type === "CHECK_IMAGE") {
@@ -13,6 +15,16 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
     if (message.type === "CHECK_VIDEO") {
         handleCheckVideo(message.url, sendResponse);
+        return true;
+    }
+
+    if (message.type === "CAPTURE_VISIBLE_TAB") {
+        handleCaptureVisibleTab(sender, sendResponse);
+        return true;
+    }
+
+    if (message.type === "CHECK_VIDEO_FRAMES") {
+        handleCheckVideoFrames(message.frames, message.sourceUrl, sendResponse);
         return true;
     }
 
@@ -145,6 +157,63 @@ async function handleCheckVideo(url, sendResponse) {
         sendResponse({ success: true, data: data });
     } catch (error) {
         console.error("Video analysis error:", error);
+        sendResponse({ success: false, error: error.message });
+    }
+}
+
+function handleCaptureVisibleTab(sender, sendResponse) {
+    const tab = sender.tab;
+    if (!tab || typeof tab.windowId !== "number" || typeof tab.id !== "number") {
+        sendResponse({ success: false, error: "Could not identify the video tab" });
+        return;
+    }
+
+    chrome.tabs.query({ active: true, windowId: tab.windowId }, (tabs) => {
+        if (chrome.runtime.lastError) {
+            sendResponse({ success: false, error: "Could not access the active tab" });
+            return;
+        }
+        if (!tabs[0] || tabs[0].id !== tab.id) {
+            sendResponse({ success: false, error: "Keep the video tab active while it is analyzed" });
+            return;
+        }
+        chrome.tabs.captureVisibleTab(tab.windowId, { format: "jpeg", quality: 80 }, (dataUrl) => {
+            if (chrome.runtime.lastError || !dataUrl) {
+                sendResponse({ success: false, error: "Could not capture a video frame from this tab" });
+                return;
+            }
+            sendResponse({ success: true, dataUrl });
+        });
+    });
+}
+
+async function handleCheckVideoFrames(frames, sourceUrl, sendResponse) {
+    try {
+        if (!Array.isArray(frames) || frames.length < 1 || frames.length > 8) {
+            throw new Error("The browser did not provide between 1 and 8 video frames");
+        }
+        const formData = new FormData();
+        let totalBytes = 0;
+        frames.forEach((dataUrl, index) => {
+            const match = /^data:image\/jpeg;base64,([A-Za-z0-9+/=]+)$/.exec(dataUrl);
+            if (!match) throw new Error("A captured video frame had an unsupported format");
+            const binary = atob(match[1]);
+            totalBytes += binary.length;
+            if (binary.length > MAX_CAPTURED_FRAME_BYTES || totalBytes > 10 * 1024 * 1024) {
+                throw new Error("Captured video frames exceed the 10 MB analysis limit");
+            }
+            const bytes = new Uint8Array(binary.length);
+            for (let offset = 0; offset < binary.length; offset++) bytes[offset] = binary.charCodeAt(offset);
+            formData.append("frames", new Blob([bytes], { type: "image/jpeg" }), `frame-${index + 1}.jpg`);
+        });
+        formData.append("source_url", sourceUrl || "");
+
+        const response = await fetch(VIDEO_FRAMES_API_URL, { method: "POST", body: formData });
+        const data = await response.json();
+        if (!response.ok || data.error) throw new Error(data.error || "Video frame analysis failed");
+        sendResponse({ success: true, data });
+    } catch (error) {
+        console.error("Captured video frame analysis error:", error);
         sendResponse({ success: false, error: error.message });
     }
 }
