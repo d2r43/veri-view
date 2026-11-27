@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
-  "name": "Veri-View Deepfake Detector",
+  "name": "Veri-View AI Media Screening",
   "version": "1.0",
-  "description": "Passive deepfake detection using local AI analysis.",
+  "description": "Privacy-first AI-generated image and video screening using a local backend.",
   "permissions": [
     "activeTab",
     "scripting",

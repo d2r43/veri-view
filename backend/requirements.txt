@@ -10,4 +10,7 @@ torch
 pillow
 mediapipe
 transformers
+safetensors
+huggingface_hub
+torchvision
 pillow

@@ -1,13 +1,14 @@
 import os
 from flask import Flask, request, jsonify, send_from_directory
 from flask_cors import CORS
-from analysis_engine import analyze_image
+from analysis_engine import analyze_image, analyze_video, analyze_video_frames
 from utils import download_image_to_memory, generate_pdf_report
 import traceback
 import time
 
 app = Flask(__name__)
 CORS(app)  # Enable CORS for Extension
+app.config["MAX_CONTENT_LENGTH"] = 51 * 1024 * 1024
 
 @app.route('/health', methods=['GET'])
 def health():
@@ -20,21 +21,29 @@ def check_image():
     Payload: { "url": "http://..." }
     """
     try:
-        data = request.json
-        image_url = data.get('url')
-        if not image_url:
-            return jsonify({"error": "No URL provided"}), 400
-
-        # Step 1: Download Image (RAM)
-        image_bytes = download_image_to_memory(image_url)
+        # New extension clients upload the image already loaded by the browser.
+        # Keep accepting URL JSON for older clients, but prefer local bytes so
+        # remote hosts do not need to permit server-side downloads.
+        image_file = request.files.get('image')
+        if image_file:
+            image_bytes = image_file.read(10 * 1024 * 1024 + 1)
+            image_url = request.form.get('source_url', '')
+            if len(image_bytes) > 10 * 1024 * 1024:
+                return jsonify({"error": "Image exceeds the 10 MB analysis limit"}), 413
+        else:
+            data = request.get_json(silent=True) or {}
+            image_url = data.get('url')
+            if not image_url:
+                return jsonify({"error": "No image provided"}), 400
+            image_bytes = download_image_to_memory(image_url)
         if not image_bytes:
-            return jsonify({"error": "Failed to download image"}), 400
+            return jsonify({"error": "Failed to read image"}), 400
 
         # Step 2: Analyze (with Latency)
         start_time = time.time()
         result = analyze_image(image_bytes, url=image_url)
         latency = round(time.time() - start_time, 2)
-        
+        result.setdefault('media_type', 'image')
         result['latency'] = latency
         
         # Step 3: Return Result
@@ -45,6 +54,64 @@ def check_image():
         traceback.print_exc()
         return jsonify({"error": "Internal Server Error"}), 500
 
+
+@app.route('/check-video', methods=['POST'])
+def check_video():
+    """Analyze a directly addressable video by sampling up to eight frames."""
+    try:
+        video_file = request.files.get('video')
+        if not video_file:
+            return jsonify({"error": "No video provided"}), 400
+
+        video_bytes = video_file.read(50 * 1024 * 1024 + 1)
+        if len(video_bytes) > 50 * 1024 * 1024:
+            return jsonify({"error": "Video exceeds the 50 MB analysis limit"}), 413
+        if not video_bytes:
+            return jsonify({"error": "Video is empty"}), 400
+
+        source_url = request.form.get('source_url', '')
+        start_time = time.time()
+        result = analyze_video(video_bytes, url=source_url)
+        result['latency'] = round(time.time() - start_time, 2)
+        return jsonify(result)
+    except Exception as e:
+        print(f"Error processing video: {e}")
+        traceback.print_exc()
+        return jsonify({"error": "Video analysis failed"}), 500
+
+
+@app.route('/check-video-frames', methods=['POST'])
+def check_video_frames():
+    """Analyze cropped frames captured locally from a rendered video player."""
+    try:
+        frame_files = request.files.getlist('frames')
+        if not frame_files or len(frame_files) > 8:
+            return jsonify({"error": "Provide between 1 and 8 video frames"}), 400
+
+        frame_bytes = []
+        total_bytes = 0
+        for frame_file in frame_files:
+            if not frame_file.mimetype.startswith('image/'):
+                return jsonify({"error": "Video frame uploads must be images"}), 400
+            frame = frame_file.read(2 * 1024 * 1024 + 1)
+            total_bytes += len(frame)
+            if len(frame) > 2 * 1024 * 1024 or total_bytes > 10 * 1024 * 1024:
+                return jsonify({"error": "Video frames exceed the 10 MB analysis limit"}), 413
+            if not frame:
+                return jsonify({"error": "A video frame is empty"}), 400
+            frame_bytes.append(frame)
+
+        source_url = request.form.get('source_url', '')
+        start_time = time.time()
+        result = analyze_video_frames(frame_bytes, url=source_url)
+        result['latency'] = round(time.time() - start_time, 2)
+        result['capture_method'] = 'browser'
+        return jsonify(result)
+    except Exception as e:
+        print(f"Error processing captured video frames: {e}")
+        traceback.print_exc()
+        return jsonify({"error": "Video frame analysis failed"}), 500
+
 @app.route('/reports/<path:filename>')
 def serve_report(filename):
     return send_from_directory('reports', filename)
@@ -52,7 +119,7 @@ def serve_report(filename):
 @app.route('/report', methods=['POST'])
 def create_report():
     """
-    Generates a legal PDF report.
+    Generates a media screening PDF report.
     Payload: { "url": "...", "metadata": {...}, "evidence": {...} }
     """
     try:
